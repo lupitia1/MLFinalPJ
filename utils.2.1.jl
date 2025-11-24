@@ -768,6 +768,16 @@ function ANNCrossValidation(topology::AbstractArray{<:Int,1},
         trainValInputs = inputs[crossValidationIndices .!= i, :]
         trainValTargets = oneHotTargets[crossValidationIndices .!= i, :]
 
+        
+        # Compute normalization parameters from TRAINING set only
+        normParams = calculateMinMaxNormalizationParameters(trainValInputs)
+
+        # Normalize training set IN PLACE
+        normalizeMinMax!(trainValInputs, normParams)
+
+        # Normalize test set (returns a new array)
+        normalizeMinMax!(testInputs, normParams)
+
         # Since ANNs are **non-deterministic**, results from a single training per fold may not be representative.  
         # For this reason, train the ANN **multiple times per fold** (as specified in `numExecutions`).
         # **Inside each fold**:
@@ -1054,13 +1064,13 @@ function modelCrossValidation(
       trainTargets = targets[crossValidationIndices .!= i]
 
       # Compute normalization parameters from TRAINING set only
-        normParams = calculateMinMaxNormalizationParameters(trainInputs)
+      normParams = calculateMinMaxNormalizationParameters(trainInputs)
 
-        # Normalize training set IN PLACE
-        normalizeMinMax!(trainInputs, normParams)
+      # Normalize training set IN PLACE
+      normalizeMinMax!(trainInputs, normParams)
 
-        # Normalize test set (returns a new array)
-        normalizeMinMax!(testInputs, normParams)
+      # Normalize test set (returns a new array)
+      normalizeMinMax!(testInputs, normParams)
 
       # 2. Create the model with the specified hyperparameters.
 
