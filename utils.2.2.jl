@@ -873,6 +873,162 @@ function ANNCrossValidation(topology::AbstractArray{<:Int,1},
     ) 
 end
 
+function ANNCrossValidationPCA(topology::AbstractArray{<:Int,1},
+        dataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{<:Any,1}},
+        crossValidationIndices::Array{Int64,1};
+        numExecutions::Int=50,
+        transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)),
+        maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01,
+        validationRatio::Real=0, maxEpochsVal::Int=20)
+    #TODO
+
+    
+    (inputs, targets) = dataset
+
+    # 1. **Extract class labels**:
+    classes = unique(targets)
+    nClasses = size(classes,1)
+
+    # 2. **One-hot encode** the categorical target labels using the `oneHotEncoding` function and the computed `classes`.
+    oneHotTargets = oneHotEncoding(targets, classes)
+
+    # 3. **Determine the number of folds** using:
+    numFolds = maximum(crossValidationIndices)
+    
+    # 4. Create one vector per metric (`accuracy`, `error rate`, `sensitivity`, `specificity`, `PPV`, `NPV`, `F1`) to store fold results.
+    accuracy = Float32[]
+    error_rate = Float32[]
+    sensitivity = Float32[]
+    specificity = Float32[]
+    ppv = Float32[]
+    npv = Float32[]
+    f1 = Float32[]
+
+    # 5. Initialize a **confusion matrix accumulator** (matrix of real numbers with all entries set to 0) for the **global test confusion matrix**.
+    cm_acc = zeros(Float32, nClasses, nClasses)
+
+    # **For each fold**:
+    for i in 1:numFolds
+        # Extract `train` and `test` subsets for **inputs** and **outputs**, based on the cross-validation indices and current fold number.
+        testInputs = inputs[crossValidationIndices .== i, :]
+        testTargets = oneHotTargets[crossValidationIndices .== i, :]
+
+        trainValInputs = inputs[crossValidationIndices .!= i, :]
+        trainValTargets = oneHotTargets[crossValidationIndices .!= i, :]
+
+        
+        # Compute normalization parameters from TRAINING set only
+        normParams = calculateMinMaxNormalizationParameters(trainValInputs)
+
+        # Normalize training set IN PLACE
+        normalizeMinMax!(trainValInputs, normParams)
+
+        # Normalize test set (returns a new array)
+        normalizeMinMax!(testInputs, normParams)
+
+        pca_model = PCA_model(variance_ratio=0.95)
+        # Train the PCA model
+        pca_mach = machine(pca_model, MLJ.table(trainValInputs))
+        MLJ.fit!(pca_mach, verbosity=0)
+        # Transform the data
+        trainValInputs = MLJBase.matrix(MLJBase.transform(pca_mach, MLJ.table(trainValInputs)))
+        testInputs  = MLJBase.matrix(MLJBase.transform(pca_mach, MLJ.table(testInputs)))
+
+        # Since ANNs are **non-deterministic**, results from a single training per fold may not be representative.  
+        # For this reason, train the ANN **multiple times per fold** (as specified in `numExecutions`).
+        # **Inside each fold**:
+        # 1. Initialize vectors to store the metric results for each execution.  
+        accuracy_fold = Float32[]
+        error_rate_fold = Float32[]
+        sensitivity_fold = Float32[]
+        specificity_fold = Float32[]
+        ppv_fold = Float32[]
+        npv_fold = Float32[]
+        f1_fold = Float32[]
+        # 2. Create a 3D array of size `(numClasses, numClasses, numExecutions)` to store test confusion matrices from each execution.
+        confusionMatrices = zeros(Float32, nClasses, nClasses, numExecutions)
+        # 3. For each execution:
+        for j in 1:numExecutions
+            # If `validationRatio > 0`, split the training set into training and validation sets using `holdOut`.
+
+            if validationRatio > 0
+                # Recalculate the validation proportion relative to the train+validation pool
+                N = size(inputs,1)
+                nTrainVal = size(trainValInputs,1)
+                nVal = Int(floor(validationRatio*N)) 
+                realValidationRatio = nVal/nTrainVal
+
+                (train_idx, val_idx) = holdOut(nTrainVal, realValidationRatio)
+
+                trainInputs = trainValInputs[train_idx, :]
+                valInputs = trainValInputs[val_idx, :]
+                trainTargets = trainValTargets[train_idx, :]
+                valTargets = trainValTargets[val_idx, :]
+                
+                # Train the network using `trainClassANN`.
+                finalANN, trainLoss, valLoss, testLoss = trainClassANN(
+                    topology,
+                    (trainInputs, trainTargets),
+                    validationDataset = (valInputs, valTargets),
+                    testDataset = (testInputs, testTargets)
+                )
+            end
+            # Train the network using `trainClassANN`.
+            finalANN, trainLoss, valLoss, testLoss = trainClassANN(
+                topology,
+                (trainValInputs, trainValTargets),
+                validationDataset = (Array{Float32}(undef, 0, 0), falses(0, 0)),
+                testDataset = (testInputs, testTargets)
+            )
+
+            # Evaluate it on the test set using `confusionMatrix`.
+            testOutputs = finalANN(testInputs')
+            testPredictions = classifyOutputs(testOutputs')
+            testPredictionsClasses = Flux.onecold(testPredictions')
+            testTargetClasses = Flux.onecold(testTargets')
+
+            # Store the returned metrics and confusion matrix.
+            accuracy_exec, error_rate_exec, sensitivity_exec, specificity_exec, ppv_exec, npv_exec, f1_exec, cm_exec = confusionMatrix(testPredictionsClasses, testTargetClasses)
+
+            push!(accuracy_fold, accuracy_exec)
+            push!(error_rate_fold, error_rate_exec)
+            push!(sensitivity_fold, sensitivity_exec)
+            push!(specificity_fold, specificity_exec)
+            push!(ppv_fold, ppv_exec)
+            push!(npv_fold, npv_exec)
+            push!(f1_fold, f1_exec)
+            confusionMatrices[:,:,j] = cm_exec
+        end
+
+        # 4. After all executions for this fold:
+        # Compute the **average** of each metric vector and store it in the global metric vectors.
+        push!(accuracy, mean(accuracy_fold))
+        push!(error_rate, mean(error_rate_fold))
+        push!(sensitivity, mean(sensitivity_fold))
+        push!(specificity, mean(specificity_fold))
+        push!(ppv, mean(ppv_fold))
+        push!(npv, mean(npv_fold))
+        push!(f1, mean(f1_fold))
+        # Compute the **mean confusion matrix** using:
+        cm_mean_fold = mean(confusionMatrices, dims=3)
+        # This returns a 3D array with one slice; you must extract the 2D matrix from it.
+        cm_mean_fold = dropdims(cm_mean_fold; dims=3)
+
+        # Add the resulting matrix to the global confusion matrix.
+        cm_acc += cm_mean_fold
+    end
+    return (
+        (mean(accuracy), std(accuracy)),
+        (mean(error_rate), std(error_rate)),
+        (mean(sensitivity), std(sensitivity)),
+        (mean(specificity), std(specificity)),
+        (mean(ppv), std(ppv)),
+        (mean(npv), std(npv)),
+        (mean(f1), std(f1)),
+        cm_acc / numFolds
+    ) 
+end
+
 #--------------------------------------------------------------------------------
 ## Normalization functions
 #--------------------------------------------------------------------------------
@@ -887,6 +1043,7 @@ function normalizeMinMax!(dataset::AbstractArray{<:Real,2},
     maxValues = normalizationParameters[2];
     dataset .-= minValues;
     dataset ./= (maxValues .- minValues);
+    clamp!(dataset, 0.0, 1.0)
     # eliminate any atribute that do not add information
     dataset[:, vec(minValues.==maxValues)] .= 0;
     return dataset;
@@ -1071,6 +1228,163 @@ function modelCrossValidation(
 
       # Normalize test set (returns a new array)
       normalizeMinMax!(testInputs, normParams)
+
+      # 2. Create the model with the specified hyperparameters.
+
+      # 3. For MLJ models (SVM, Decision Tree, kNN):
+      # - Instantiate the model using the appropriate constructor: `SVMClassifier`, `DTClassifier`, or `kNNClassifier`, depending on `modelType`.
+      if modelType == :SVC
+         kernel = get(modelHyperparameters, "kernel", "linear")
+         C = get(modelHyperparameters, "C", 1.0)
+         gamma = get(modelHyperparameters, "gamma", 2.0)
+         degree = get(modelHyperparameters, "degree", 3)
+         coef0 = get(modelHyperparameters, "coef0", 1.0)
+         
+         if kernel == "linear"
+            model = SVMClassifier(kernel=LIBSVM.Kernel.Linear, cost=Float64(C))
+
+         elseif kernel == "rbf"
+            model = SVMClassifier(kernel=LIBSVM.Kernel.RadialBasis, cost=Float64(C), gamma=Float64(gamma), degree=Int32(degree))
+
+         elseif kernel == "sigmoid"
+            model = SVMClassifier(kernel=LIBSVM.Kernel.Sigmoid, cost=Float64(C), gamma=Float64(gamma), coef0=Float64(coef0))
+
+         elseif kernel == "poly"
+            model = SVMClassifier(kernel=LIBSVM.Kernel.Polynomial, cost=Float64(C), gamma=Float64(gamma), degree=Int32(degree), coef0=Float64(coef0))
+
+         else
+            error("Unsupported SVM kernel: $kernel. Please use one of [\"linear\", \"rbf\", \"sigmoid\", \"poly\"].")
+         end
+         
+      elseif modelType == :DecisionTreeClassifier
+         max_depth = get(modelHyperparameters, "max_depth", 4)
+         rng = get(modelHyperparameters, "rng", Random.MersenneTwister(1))
+         model = DTClassifier(max_depth=max_depth, rng=rng)
+      
+      elseif modelType == :KNeighborsClassifier
+         K = get(modelHyperparameters, "K", 3)
+         model = kNNClassifier(K=K)
+      
+      else
+         error("Unsupported model type: $modelType. Please use one of [:ANN, :SVC, :DecisionTreeClassifier, :KNeighborsClassifier].")
+      end
+
+      # - Wrap the model in a `machine` with the training data.
+      mach = machine(model, MLJ.table(trainInputs), categorical(trainTargets))
+
+      # - Train the model using `fit!`.
+      MLJ.fit!(mach, verbosity=0)
+         
+      # 4. Perform predictions on the test data using `predict`.
+      testOutputs = MLJ.predict(mach, MLJ.table(testInputs));
+      # - For Decision Trees and kNN, use `mode` to convert the probabilistic predictions into categorical labels:
+      if modelType == :DecisionTreeClassifier || modelType == :KNeighborsClassifier
+         testOutputs = mode.(testOutputs)
+      end
+      # - For SVMs, the output of `predict` can be compared directly with the ground truth, since it returns a `CategoricalArray`.
+
+      # Once the predicted labels for the test set are available, the evaluation metrics and the confusion matrix should be computed using the `confusionMatrix` function.
+      accuracy_fold, error_rate_fold, sensitivity_fold, specificity_fold, ppv_fold, npv_fold, f1_fold, cm_fold = confusionMatrix(testOutputs, testTargets)
+
+      # - The metrics returned should be stored in their respective positions within the metric vectors.
+      push!(accuracy, accuracy_fold)
+      push!(error_rate, error_rate_fold)
+      push!(sensitivity, sensitivity_fold)
+      push!(specificity, specificity_fold)
+      push!(ppv, ppv_fold)
+      push!(npv, npv_fold)
+      push!(f1, f1_fold)
+      
+      # - The confusion matrix obtained for each fold should be **added** to a global confusion matrix for the test set.
+      cm_acc += cm_fold
+   end
+   
+   return (
+      (mean(accuracy), std(accuracy)),
+      (mean(error_rate), std(error_rate)),
+      (mean(sensitivity), std(sensitivity)),
+      (mean(specificity), std(specificity)),
+      (mean(ppv), std(ppv)),
+      (mean(npv), std(npv)),
+      (mean(f1), std(f1)),
+      cm_acc / numFolds
+   )
+end
+
+function modelCrossValidationPCA(
+        modelType::Symbol, modelHyperparameters::Dict,
+        dataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{<:Any,1}},
+        crossValidationIndices::Array{Int64,1})
+    #TODO
+
+   # The function will begin by checking whether the model to be trained is a neural network, by examining the `modelType` parameter. 
+   if modelType == :ANN 
+      # If this is the case, it will call the `ANNCrossValidation` function, passing the hyperparameters provided in `modelHyperparameters`.
+      # Keep in mind that many of the hyperparameters for neural networks may not be defined in the dictionary. 
+      topology = get(modelHyperparameters, "topology", [5,4,3])
+      numExecutions = get(modelHyperparameters, "numExecutions", 5)
+      transferFunctions = get(modelHyperparameters, "transferFunctions", fill(σ, length(topology)))
+      maxEpochs = get(modelHyperparameters, "maxEpochs", 50)
+      minLoss = get(modelHyperparameters, "minLoss", 0.0)
+      learningRate = get(modelHyperparameters, "learningRate", 0.01)
+      validationRatio = get(modelHyperparameters, "validationRatio", 0)
+      maxEpochsVal = get(modelHyperparameters, "maxEpochsVal", 10)
+      return ANNCrossValidation(topology, dataset, crossValidationIndices; numExecutions=numExecutions, transferFunctions=transferFunctions, maxEpochs=maxEpochs, minLoss=minLoss, learningRate=learningRate, validationRatio=validationRatio, maxEpochsVal=maxEpochsVal)
+   end   
+   # If a different type of model is to be trained, the logic continues similarly to the previous exercise:
+   (inputs, targets) = dataset
+   classes = unique(targets)
+   nClasses = size(classes,1)
+
+   # - Create seven vectors to store the results of the metrics for each fold.
+   accuracy = Float32[]
+   error_rate = Float32[]
+   sensitivity = Float32[]
+   specificity = Float32[]
+   ppv = Float32[]
+   npv = Float32[]
+   f1 = Float32[]
+   # - Create a 2D array to accumulate the confusion matrix, initialized with zeros.
+   cm_acc = zeros(Float32, nClasses, nClasses)
+
+   # A key modification when using models from the MLJ library is to **convert the target labels to strings** before training any model.  
+   # This helps prevent errors caused by internal type mismatches in some model implementations.
+   targets = string.(targets);
+
+   # Additionally, it will be necessary to compute the vector of unique classes, just like in the previous exercise.  
+   # classes = unique(targets);  # already done
+
+   # Once these initial steps are completed, the cross-validation loop can begin.
+   numFolds = maximum(crossValidationIndices)
+
+   # In each iteration, the following steps are performed:
+   for i in 1:numFolds
+      # 1. Extract the training and test input matrices and the corresponding target vectors.  
+         # These should be of type `AbstractArray{<:Any,1}` for the targets.
+      testInputs = inputs[crossValidationIndices .== i, :]
+      testTargets = targets[crossValidationIndices .== i]
+
+      trainInputs = inputs[crossValidationIndices .!= i, :]
+      trainTargets = targets[crossValidationIndices .!= i]
+
+      # Compute normalization parameters from TRAINING set only
+      normParams = calculateMinMaxNormalizationParameters(trainInputs)
+
+      # Normalize training set IN PLACE
+      normalizeMinMax!(trainInputs, normParams)
+
+      # Normalize test set (returns a new array)
+      normalizeMinMax!(testInputs, normParams)
+
+      
+      pca_model = PCA_model(variance_ratio=0.95)
+      # Train the PCA model
+      pca_mach = machine(pca_model, MLJ.table(trainInputs))
+      MLJ.fit!(pca_mach, verbosity=0)
+      # Transform the data
+      trainInputs = MLJBase.matrix(MLJBase.transform(pca_mach, MLJ.table(trainInputs)))
+      testInputs  = MLJBase.matrix(MLJBase.transform(pca_mach, MLJ.table(testInputs)))
+
 
       # 2. Create the model with the specified hyperparameters.
 
