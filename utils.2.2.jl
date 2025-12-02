@@ -216,9 +216,9 @@ end;
 # accuracy(outputs::Vector{Int64}, targets::Vector{Int64}) 
 #    mean(outputs.==targets);
 #-------------------------------------------------------------------------------------
-function accuracy(outputs::Vector{Int64}, targets::Vector{Int64}) 
-    mean(outputs.==targets);
-end;
+# function accuracy(outputs::Vector{Int64}, targets::Vector{Int64}) 
+#     mean(outputs.==targets);
+# end;
 
 
 #-------------------------------------------------------------------------------------
@@ -1466,4 +1466,116 @@ function modelCrossValidationPCA(
       (mean(f1), std(f1)),
       cm_acc / numFolds
    )
+end
+
+#-------------------------------------------------------------------
+# printANNResult
+# Pretty print confusion matrix for PCA ANN
+#-------------------------------------------------------------------
+function printPCAANNResult(model, hyperparams, metrics, outdim, class_labels)
+    accuracy, error_rate, recall, specificity, ppv, npv, f1, cm = metrics
+
+    println("\n=====================================================")
+    println(" Model: $model   | PCA outdim = $outdim ")
+    println(" Hyperparameters: $hyperparams")
+    println("=====================================================")
+
+    println(rpad(" Accuracy", 25), ": ", round(accuracy, digits=4))
+    println(rpad(" Error Rate", 25), ": ", round(error_rate, digits=4))
+    println(rpad(" Sensitivity/Recall", 25), ": ", round(recall, digits=4))
+    println(rpad(" Specificity", 25), ": ", round(specificity, digits=4))
+    println(rpad(" PPV", 25), ": ", round(ppv, digits=4))
+    println(rpad(" NPV", 25), ": ", round(npv, digits=4))
+    println(rpad(" F1 Score", 25), ": ", round(f1, digits=4))
+
+    println("\nConfusion Matrix:")
+    println(cm)
+    println("=====================================================\n")
+
+    cm_df = DataFrame(cm, :auto)
+    PrettyTables.pretty_table(cm_df; header=class_labels, row_labels=class_labels)
+end
+
+#-------------------------------------------------------------------
+# printResult
+# Pretty print confusion matrix for PCA SVM/DT/KNN
+#------------------------------------------------------------------
+function printPCAResult(model, hyperparams, metrics,outdim,class_labels)
+    # Unpack metrics returned by confusionMatrix
+    accuracy, error_rate, recall, specificity, ppv, npv, f1, cm = metrics
+
+    println("\n=====================================================")
+    println(" Model: $model outdim $outdim ")
+    println(" Hyperparameters: $hyperparams")
+    println("=====================================================")
+
+    println(rpad(" Accuracy", 25), ": ", round(accuracy, digits=4))
+    println(rpad(" Error Rate", 25), ": ", round(error_rate, digits=4))
+    println(rpad(" Sensitivity/Recall", 25), ": ", round(recall, digits=4))
+    println(rpad(" Specificity", 25), ": ", round(specificity, digits=4))
+    println(rpad(" PPV", 25), ": ", round(ppv, digits=4))
+    println(rpad(" NPV", 25), ": ", round(npv, digits=4))
+    println(rpad(" F1 Score", 25), ": ", round(f1, digits=4))
+
+    println("\nConfusion Matrix:")
+    println(cm)
+    println("=====================================================\n")
+    cm_df = DataFrame(cm, :auto)
+    PrettyTables.pretty_table(cm_df; header=class_labels, row_labels=class_labels)
+end
+
+#-------------------------------------------------------------------
+# printANNResult
+# Pretty print confusion matrix for  ANN
+#-------------------------------------------------------------------
+function printANNResult(model, hyperparams, metrics,class_labels)
+    accuracy, error_rate, recall, specificity, ppv, npv, f1, cm = metrics
+
+    println("\n=====================================================")
+    println(" Model: $model   ")
+    println(" Hyperparameters: $hyperparams")
+    println("=====================================================")
+
+    println(rpad(" Accuracy", 25), ": ", round(accuracy, digits=4))
+    println(rpad(" Error Rate", 25), ": ", round(error_rate, digits=4))
+    println(rpad(" Sensitivity/Recall", 25), ": ", round(recall, digits=4))
+    println(rpad(" Specificity", 25), ": ", round(specificity, digits=4))
+    println(rpad(" PPV", 25), ": ", round(ppv, digits=4))
+    println(rpad(" NPV", 25), ": ", round(npv, digits=4))
+    println(rpad(" F1 Score", 25), ": ", round(f1, digits=4))
+
+    println("\nConfusion Matrix:")
+    println(cm)
+    println("=====================================================\n")
+
+    cm_df = DataFrame(cm, :auto)
+    PrettyTables.pretty_table(cm_df; header=class_labels, row_labels=class_labels)
+end
+
+#-------------------------------------------------------------------
+# printResult
+# Pretty print confusion matrix for  SVM/DT/KNN
+#------------------------------------------------------------------
+function printResult(model, hyperparams, metrics,class_labels)
+    # Unpack metrics returned by confusionMatrix
+    accuracy, error_rate, recall, specificity, ppv, npv, f1, cm = metrics
+
+    println("\n=====================================================")
+    println(" Model: $model")
+    println(" Hyperparameters: $hyperparams")
+    println("=====================================================")
+
+    println(rpad(" Accuracy", 25), ": ", round(accuracy, digits=4))
+    println(rpad(" Error Rate", 25), ": ", round(error_rate, digits=4))
+    println(rpad(" Sensitivity/Recall", 25), ": ", round(recall, digits=4))
+    println(rpad(" Specificity", 25), ": ", round(specificity, digits=4))
+    println(rpad(" PPV", 25), ": ", round(ppv, digits=4))
+    println(rpad(" NPV", 25), ": ", round(npv, digits=4))
+    println(rpad(" F1 Score", 25), ": ", round(f1, digits=4))
+
+    println("\nConfusion Matrix:")
+    println(cm)
+    println("=====================================================\n")
+    cm_df = DataFrame(cm, :auto)
+    PrettyTables.pretty_table(cm_df; header=class_labels, row_labels=class_labels)
 end
