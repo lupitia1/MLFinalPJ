@@ -879,7 +879,8 @@ function ANNCrossValidationPCA(topology::AbstractArray{<:Int,1},
         numExecutions::Int=50,
         transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)),
         maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01,
-        validationRatio::Real=0, maxEpochsVal::Int=20)
+        validationRatio::Real=0, maxEpochsVal::Int=20,
+        dimPCA::Int=6)
     #TODO
 
     
@@ -926,7 +927,7 @@ function ANNCrossValidationPCA(topology::AbstractArray{<:Int,1},
         # Normalize test set (returns a new array)
         normalizeMinMax!(testInputs, normParams)
 
-        pca_model = PCA_model(variance_ratio=0.95)
+        pca_model = PCA_model(maxoutdim=dimPCA)
         # Train the PCA model
         pca_mach = machine(pca_model, MLJ.table(trainValInputs))
         MLJ.fit!(pca_mach, verbosity=0)
@@ -1314,7 +1315,8 @@ end
 function modelCrossValidationPCA(
         modelType::Symbol, modelHyperparameters::Dict,
         dataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{<:Any,1}},
-        crossValidationIndices::Array{Int64,1})
+        crossValidationIndices::Array{Int64,1},
+        dimPCA::Int=6)
     #TODO
 
    # The function will begin by checking whether the model to be trained is a neural network, by examining the `modelType` parameter. 
@@ -1377,7 +1379,7 @@ function modelCrossValidationPCA(
       normalizeMinMax!(testInputs, normParams)
 
       
-      pca_model = PCA_model(variance_ratio=0.95)
+      pca_model = PCA_model(maxoutdim=dimPCA)
       # Train the PCA model
       pca_mach = machine(pca_model, MLJ.table(trainInputs))
       MLJ.fit!(pca_mach, verbosity=0)
