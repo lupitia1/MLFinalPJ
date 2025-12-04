@@ -1215,11 +1215,11 @@ function modelCrossValidation(
    for i in 1:numFolds
       # 1. Extract the training and test input matrices and the corresponding target vectors.  
          # These should be of type `AbstractArray{<:Any,1}` for the targets.
-      testInputs = inputs[crossValidationIndices .== i, :]
-      testTargets = targets[crossValidationIndices .== i]
+      testInputs = copy(inputs[crossValidationIndices .== i, :])
+      testTargets = copy(targets[crossValidationIndices .== i])
 
-      trainInputs = inputs[crossValidationIndices .!= i, :]
-      trainTargets = targets[crossValidationIndices .!= i]
+      trainInputs = copy(inputs[crossValidationIndices .!= i, :])
+      trainTargets = copy(targets[crossValidationIndices .!= i])
 
       # Compute normalization parameters from TRAINING set only
       normParams = calculateMinMaxNormalizationParameters(trainInputs)
@@ -1363,11 +1363,11 @@ function modelCrossValidationPCA(
    for i in 1:numFolds
       # 1. Extract the training and test input matrices and the corresponding target vectors.  
          # These should be of type `AbstractArray{<:Any,1}` for the targets.
-      testInputs = inputs[crossValidationIndices .== i, :]
-      testTargets = targets[crossValidationIndices .== i]
+      testInputs = copy(inputs[crossValidationIndices .== i, :])
+      testTargets = copy(targets[crossValidationIndices .== i])
 
-      trainInputs = inputs[crossValidationIndices .!= i, :]
-      trainTargets = targets[crossValidationIndices .!= i]
+      trainInputs = copy(inputs[crossValidationIndices .!= i, :])
+      trainTargets = copy(targets[crossValidationIndices .!= i])
 
       # Compute normalization parameters from TRAINING set only
       normParams = calculateMinMaxNormalizationParameters(trainInputs)
